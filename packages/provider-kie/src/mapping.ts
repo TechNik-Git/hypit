@@ -8,6 +8,9 @@ const GPT_IMAGE: ModuleRef = { name: "@hypit/gpt-image", version: "1" };
 const NANO_BANANA: ModuleRef = { name: "@hypit/nano-banana", version: "1" };
 const GROK: ModuleRef = { name: "@hypit/grok-imagine", version: "1" };
 const WAN: ModuleRef = { name: "@hypit/wan", version: "1" };
+const SUNO: ModuleRef = { name: "@hypit/suno", version: "1" };
+const ELEVEN_TTS: ModuleRef = { name: "@hypit/elevenlabs-tts", version: "1" };
+const GEMINI_TTS: ModuleRef = { name: "@hypit/gemini-tts", version: "1" };
 
 /** The `personReference` item field Seedance's visual references declare; Kie has no such wire input. */
 const PERSON_REFERENCE = ["personReference"];
@@ -180,4 +183,116 @@ export const kieMappings: readonly GenerationWireMapping[] = [
       seed: { as: "value", field: "seed" },
     },
   },
+  {
+    // Suno's music route. The two-tier naming matters here: the mapping's route
+    // `model` is Kie's slug `ai-music-api/generate`, while the port `model` is
+    // the Suno version selector (`V6` family) sent as `input.model`.
+    capability: { module: SUNO, name: "generate-music" }, result: "audio",
+    routes: [{ model: "ai-music-api/generate" }],
+    fields: {
+      customMode: { as: "value", field: "custom_mode" },
+      instrumental: { as: "value", field: "instrumental" },
+      model: { as: "value", field: "model" },
+      prompt: { as: "value", field: "prompt" },
+      lyrics: { as: "value", field: "lyrics" },
+      style: { as: "value", field: "style" },
+      title: { as: "value", field: "title" },
+      negativeTags: { as: "value", field: "negative_tags" },
+      vocalGender: { as: "value", field: "vocal_gender" },
+      styleWeight: { as: "value", field: "style_weight" },
+      weirdnessConstraint: { as: "value", field: "weirdness_constraint" },
+      audioWeight: { as: "value", field: "audio_weight" },
+      variety: { as: "value", field: "variety" },
+      personaId: { as: "value", field: "persona_id" },
+      personaModel: { as: "value", field: "persona_model" },
+      duration: { as: "value", field: "duration" },
+      imageUrls: { as: "urlArray", field: "image_urls" },
+      videoUrls: { as: "urlArray", field: "video_urls" },
+      audioUrls: { as: "urlArray", field: "audio_urls" },
+    },
+  },
+  {
+    capability: { module: SUNO, name: "generate-sounds" }, result: "audio",
+    routes: [{ model: "ai-music-api/sounds" }],
+    fields: {
+      prompt: { as: "value", field: "prompt" },
+      model: { as: "value", field: "model" },
+      soundLoop: { as: "value", field: "sound_loop" },
+      soundTempo: { as: "value", field: "sound_tempo" },
+      soundKey: { as: "value", field: "sound_key" },
+      grabLyrics: { as: "value", field: "grab_lyrics" },
+    },
+  },
+  {
+    capability: { module: ELEVEN_TTS, name: "text-to-speech-multilingual-v2" }, result: "audio",
+    routes: [{ model: "elevenlabs/text-to-speech-multilingual-v2" }],
+    fields: {
+      text: { as: "value", field: "text" },
+      voice: { as: "value", field: "voice" },
+      stability: { as: "value", field: "stability" },
+      similarityBoost: { as: "value", field: "similarity_boost" },
+      style: { as: "value", field: "style" },
+      speed: { as: "value", field: "speed" },
+      timestamps: { as: "value", field: "timestamps" },
+      previousText: { as: "value", field: "previous_text" },
+      nextText: { as: "value", field: "next_text" },
+    },
+  },
+  {
+    capability: { module: ELEVEN_TTS, name: "text-to-speech-turbo-2-5" }, result: "audio",
+    routes: [{ model: "elevenlabs/text-to-speech-turbo-2-5" }],
+    fields: {
+      text: { as: "value", field: "text" },
+      voice: { as: "value", field: "voice" },
+      stability: { as: "value", field: "stability" },
+      similarityBoost: { as: "value", field: "similarity_boost" },
+      style: { as: "value", field: "style" },
+      speed: { as: "value", field: "speed" },
+      timestamps: { as: "value", field: "timestamps" },
+      previousText: { as: "value", field: "previous_text" },
+      nextText: { as: "value", field: "next_text" },
+      languageCode: { as: "value", field: "language_code" },
+    },
+  },
+  {
+    // dialogue-v3's `dialogue: [{text, voice}]` is two parallel arrays on the
+    // port side; normalize() zips the temporary wire fields into the objects.
+    capability: { module: ELEVEN_TTS, name: "text-to-dialogue-v3" }, result: "audio",
+    routes: [{ model: "elevenlabs/text-to-dialogue-v3" }],
+    fields: {
+      dialogueText: { as: "valueArray", field: "dialogue_text" },
+      dialogueVoice: { as: "valueArray", field: "dialogue_voice" },
+      stability: { as: "value", field: "stability" },
+      languageCode: { as: "value", field: "language_code" },
+    },
+  },
+  {
+    capability: { module: ELEVEN_TTS, name: "audio-isolation" }, result: "audio",
+    routes: [{ model: "elevenlabs/audio-isolation" }],
+    fields: {
+      source: { as: "url", field: "audio_url" },
+    },
+  },
+  ...([["gemini-2-5-pro-tts", false], ["gemini-3-1-flash-tts", false],
+    ["gemini-3-8-flash-tts", true], ["gemini-3-8-flash-lite-tts", true]] as const)
+    .map(([name, styled]): GenerationWireMapping => ({
+      // speakers[] and dialogue_turns[] are parallel arrays on the port side;
+      // normalize() zips them into the documented object arrays.
+      capability: { module: GEMINI_TTS, name }, result: "audio",
+      routes: [{ model: `google/${name}` }],
+      fields: {
+        speakerId: { as: "valueArray", field: "speaker_id" },
+        speakerVoice: { as: "valueArray", field: "speaker_voice" },
+        turnSpeakerId: { as: "valueArray", field: "turn_speaker_id" },
+        turnText: { as: "valueArray", field: "turn_text" },
+        ...(styled ? { turnStyle: { as: "valueArray" as const, field: "turn_style" } } : {}),
+        temperature: { as: "value", field: "temperature" },
+        ...(name === "gemini-2-5-pro-tts" || name === "gemini-3-1-flash-tts"
+          ? {
+            scene: { as: "value" as const, field: "scene" },
+            sampleContext: { as: "value" as const, field: "sample_context" },
+          }
+          : { fillerWords: { as: "value" as const, field: "filler_words" } }),
+      },
+    })),
 ];

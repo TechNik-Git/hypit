@@ -11,15 +11,21 @@ import { artifactTypes } from "@hypit/artifact";
 import { canonicalize } from "@hypit/protocol";
 import type { BlobRef,CapabilityRef, CanonicalValue } from "@hypit/protocol";
 import { credentialRef } from "@hypit/runtime";
+import { textTypes } from "@hypit/text";
 import type { CreateKieProviderOptions } from "./options.js";
 import { kieProviderDefaults, kieProviderModuleRef } from "./options.js";
-import { KieClient, kieResultUrls } from "./client.js";
+import { KieClient, kieAudioTrackUrls, kieLyricsVariations, kieResultUrls } from "./client.js";
 import { KieHttpError, KieServiceError, kieTaskFailure, safeKieReason } from "./errors.js";
 import { kieRouteForCapability, kieRoutes, kieCapabilityKey } from "./routes.js";
 import { kieMediaURLResolver } from "./upload.js";
 
 export const REMOVE_BACKGROUND_CAPABILITY: CapabilityRef = {
   module: { name: "@hypit/background-removal", version: "1" }, name: "remove-background",
+};
+
+/** Suno's lyrics route delivers text (`resultJson.resultObject.lyricsData[]`), not media. */
+export const GENERATE_LYRICS_CAPABILITY: CapabilityRef = {
+  module: { name: "@hypit/suno", version: "1" }, name: "generate-lyrics",
 };
 
 type Handle = {
@@ -29,6 +35,8 @@ type Handle = {
   readonly model: string;
   readonly startedAt: number;
   readonly urls?: readonly string[];
+  /** The packaged lyric body of one generate-lyrics run. */
+  readonly text?: string;
 };
 
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -71,6 +79,17 @@ function removeBackgroundSupport(request: EndpointRequest): EndpointSupport {
   return { status: "supported" };
 }
 
+function generateLyricsSupport(request: EndpointRequest): EndpointSupport {
+  const prompt = (request.constraints as { prompt?: unknown } | null)?.prompt;
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    return { status: "unsupported", reason: "generate-lyrics carries no prompt" };
+  }
+  if (prompt.trim().length > 200) {
+    return { status: "unsupported", reason: "Kie's generate-lyrics prompt is capped at 200 characters" };
+  }
+  return { status: "supported" };
+}
+
 function endpointFactory(client: KieClient, pollIntervalMs: number, operationTimeoutMs: number): AsyncEndpoint {
   return {
     async start(context) {
@@ -79,6 +98,9 @@ function endpointFactory(client: KieClient, pollIntervalMs: number, operationTim
         const isBackground = context.need.capability.module.name === REMOVE_BACKGROUND_CAPABILITY.module.name
           && context.need.capability.name === REMOVE_BACKGROUND_CAPABILITY.name;
         if (isBackground) return await startBackgroundRemoval(client, context, secret, pollIntervalMs);
+        const isLyrics = context.need.capability.module.name === GENERATE_LYRICS_CAPABILITY.module.name
+          && context.need.capability.name === GENERATE_LYRICS_CAPABILITY.name;
+        if (isLyrics) return await startGenerateLyrics(client, context, secret, pollIntervalMs);
         const route = kieRouteForCapability(context.need.capability);
         assert(route !== undefined, "Kie does not implement this exact capability");
         const prepared = route.prepare(context.need.constraints);
@@ -129,7 +151,17 @@ function endpointFactory(client: KieClient, pollIntervalMs: number, operationTim
           } };
         }
         assert(state === "success", `Kie returned the unknown task state ${String(state)}`);
-        const urls = kieResultUrls(record);
+        if (handle.capability === kieCapabilityKey(GENERATE_LYRICS_CAPABILITY)) {
+          const variations = kieLyricsVariations(record);
+          return {
+            status: "ready",
+            handle: canonicalize({ ...handle, text: variations.map((item) => item.text).join("\n\n") }),
+            receipt,
+          };
+        }
+        // Suno audio routes answer with per-track `data.response.data[]`; TTS and the
+        // media routes answer with `resultUrls`.
+        const urls = kieAudioTrackUrls(record) ?? kieResultUrls(record);
         return { status: "ready", handle: canonicalize({ ...handle, urls }), receipt };
       } catch (error) {
         return pollAgainOrFail(error, { handle: context.handle, pollIntervalMs, failure });
@@ -138,6 +170,16 @@ function endpointFactory(client: KieClient, pollIntervalMs: number, operationTim
     async collect(context) {
       try {
         const handle = object(context.handle, "Kie handle") as unknown as Handle;
+        if (handle.capability === kieCapabilityKey(GENERATE_LYRICS_CAPABILITY)) {
+          assert(typeof handle.text === "string" && handle.text.trim().length > 0,
+            "Kie carry handle has no collected lyrics text");
+          await context.reportProgress?.({ phase: "Receiving generated lyrics" });
+          return {
+            status: "completed",
+            result: { value: { kind: "inline" as const, value: canonicalize({ value: handle.text }) } },
+            receipt: { id: handle.taskId },
+          };
+        }
         assert(Array.isArray(handle.urls) && handle.urls.length > 0, "Kie carry handle has no collected URLs");
         const isBackground = handle.capability === kieCapabilityKey(REMOVE_BACKGROUND_CAPABILITY);
         await context.reportProgress?.({ phase: "Receiving generated files" });
@@ -194,6 +236,25 @@ async function startBackgroundRemoval(
   return { ...wakeAfter(canonicalize(handle), pollIntervalMs, Date.now(), { phase: "submitted" }), receipt };
 }
 
+/** `ai-music-api/generate-lyrics` — one `prompt` in, lyric variations out (docs cap the prompt at 200 chars). */
+async function startGenerateLyrics(
+  client: KieClient, context: EndpointStartContext, secret: string, pollIntervalMs: number,
+): Promise<EndpointOutcome> {
+  const constraints = object(context.need.constraints, "generate-lyrics request");
+  const prompt = constraints.prompt;
+  assert(typeof prompt === "string" && prompt.trim().length > 0, "generate-lyrics request carries no prompt");
+  assert(prompt.trim().length <= 200, "Kie's generate-lyrics prompt is capped at 200 characters");
+  await context.reportProgress?.({ phase: "Submitting Kie task: ai-music-api/generate-lyrics" });
+  const taskId = await client.createTask(secret, "ai-music-api/generate-lyrics", { prompt: prompt.trim() });
+  const handle: Handle = {
+    contract: "hypit.kie-operation@1", taskId, capability: kieCapabilityKey(GENERATE_LYRICS_CAPABILITY),
+    model: "ai-music-api/generate-lyrics", startedAt: Date.now(),
+  };
+  const receipt = { id: taskId };
+  await context.checkpoint?.({ handle: canonicalize(handle), receipt });
+  return { ...wakeAfter(canonicalize(handle), pollIntervalMs, Date.now(), { phase: "submitted" }), receipt };
+}
+
 async function download(client: KieClient, key: string, url: string): Promise<{ readonly bytes: Uint8Array; readonly mediaType: string }> {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
@@ -243,6 +304,10 @@ export function createKieProvider(options: CreateKieProviderOptions) {
       {
         capability: REMOVE_BACKGROUND_CAPABILITY, returns: artifactTypes.blob, lifecycle: "asynchronous" as const,
         endpoint: asyncEndpoint, capacity: "remove-background", supports: removeBackgroundSupport,
+      },
+      {
+        capability: GENERATE_LYRICS_CAPABILITY, returns: textTypes.text, lifecycle: "asynchronous" as const,
+        endpoint: asyncEndpoint, capacity: "generate-lyrics", supports: generateLyricsSupport,
       },
     ],
   });

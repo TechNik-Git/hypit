@@ -34,6 +34,9 @@ const kieMediaLimits: Readonly<Record<string, KieMediaLimits>> = {
   "seedream/5-lite-image-to-image": { image: 30 * MB },
   "pixverse-v6/image-to-video": { image: 20 * MB },
   "pixverse-v6/transition": { image: 20 * MB },
+  // Non-custom Suno references (docs `suno-api/generate-music.md`).
+  "ai-music-api/generate": { image: 10 * MB, video: 100 * MB, audio: 500 * MB },
+  "elevenlabs/audio-isolation": { audio: 10 * MB },
 };
 
 /** Kie's GPT Image 2 page lists aspect ratios each higher resolution refuses; `1:1` cannot render 4K. */
@@ -136,6 +139,36 @@ function rejection(mapping: GenerationWireMapping, request: GenerationRequest): 
     return undefined;
   }
 
+  if (module === "@hypit/suno" && mapping.capability.name === "generate-music") {
+    // docs.kie.ai `suno-api/generate-music.md` — the mode grammar is narrower than the
+    // union of ports the model table carries.
+    const custom = scalar(request, "customMode") === true;
+    const instrumental = scalar(request, "instrumental") === true;
+    const refs = ["imageUrls", "videoUrls", "audioUrls"].filter((port) => present(request, port));
+    if (instrumental && present(request, "audioWeight")) {
+      return "Kie's generate-music does not support audio_weight without vocals";
+    }
+    if (custom) {
+      if (!present(request, "title")) return "Kie's generate-music custom_mode requires a title";
+      if (refs.length > 0) return "Kie's generate-music custom_mode takes no image_urls/video_urls/audio_urls references";
+      if (!present(request, "style") && !present(request, "lyrics") && !present(request, "negativeTags")) {
+        return "Kie's generate-music custom_mode needs at least one of style, lyrics or negative_tags";
+      }
+    } else {
+      const customOnly = ["duration", "vocalGender", "styleWeight", "weirdnessConstraint", "audioWeight", "variety"]
+        .find((port) => present(request, port));
+      if (customOnly !== undefined) return `Kie's generate-music non-custom mode takes no ${customOnly}`;
+      const prompt = scalar(request, "prompt");
+      if (typeof prompt === "string" && prompt.length > 3000) {
+        return "Kie's generate-music non-custom prompt is capped at 3000 characters";
+      }
+      if (refs.length === 0 && !present(request, "style") && !present(request, "lyrics")) {
+        return "Kie's generate-music non-custom mode needs at least one of image_urls, video_urls, audio_urls, style or lyrics";
+      }
+    }
+    return undefined;
+  }
+
   return undefined;
 }
 
@@ -159,6 +192,42 @@ function normalize(
       input.image_urls = [input.first_frame_image_url];
       delete input.first_frame_image_url;
     }
+  }
+  if (mapping.capability.name === "text-to-dialogue-v3") {
+    // `dialogue: [{text, voice}]` comes from the two parallel port arrays.
+    const texts = input.dialogue_text;
+    const voices = input.dialogue_voice;
+    if (Array.isArray(texts) && Array.isArray(voices)) {
+      input.dialogue = texts.map((text, index) => ({ text, voice: voices[index] }));
+    }
+    delete input.dialogue_text;
+    delete input.dialogue_voice;
+  }
+  if (mapping.capability.module.name === "@hypit/gemini-tts") {
+    // `speakers: [{speaker_id, voice_name}]` and `dialogue_turns: [{speaker_id, text, style?}]`.
+    const ids = input.speaker_id;
+    const voices = input.speaker_voice;
+    if (Array.isArray(ids)) {
+      input.speakers = ids.map((id, index) => ({
+        speaker_id: id,
+        ...(Array.isArray(voices) && voices[index] !== undefined ? { voice_name: voices[index] } : {}),
+      }));
+    }
+    const turnIds = input.turn_speaker_id;
+    const turnTexts = input.turn_text;
+    const turnStyles = input.turn_style;
+    if (Array.isArray(turnTexts)) {
+      input.dialogue_turns = turnTexts.map((text, index) => ({
+        speaker_id: Array.isArray(turnIds) ? turnIds[index] : undefined,
+        text,
+        ...(Array.isArray(turnStyles) && turnStyles[index] !== undefined ? { style: turnStyles[index] } : {}),
+      }));
+    }
+    delete input.speaker_id;
+    delete input.speaker_voice;
+    delete input.turn_speaker_id;
+    delete input.turn_text;
+    delete input.turn_style;
   }
   return canonicalize(input);
 }

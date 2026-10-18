@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { assertMappingCoversPorts, generationTypes } from "@hypit/generation";
 import type { BlobRef, CanonicalValue } from "@hypit/protocol";
+import { elevenLabsTtsPorts } from "@hypit/elevenlabs-tts";
+import { geminiTtsPorts } from "@hypit/gemini-tts";
 import { gptImage2Ports, sealGptImage2Request } from "@hypit/gpt-image";
 import { grokImagine15PreviewPorts, grokImagineVideoPorts, sealGrokImagineRequest } from "@hypit/grok-imagine";
 import { minimaxH3Ports, sealMinimaxH3Request } from "@hypit/minimax-h3";
@@ -9,6 +11,7 @@ import { nanoBananaPorts, sealNanoBananaRequest } from "@hypit/nano-banana";
 import { pixversePorts, sealPixverseRequest } from "@hypit/pixverse";
 import { seedancePorts, sealSeedanceRequest } from "@hypit/seedance";
 import { seedream5LitePorts, sealSeedreamRequest } from "@hypit/seedream";
+import { generateMusicPorts, generateSoundsPorts } from "@hypit/suno";
 import { wanPorts, sealWanRequest } from "@hypit/wan";
 
 import { kieMappings } from "../src/mapping.js";
@@ -22,7 +25,7 @@ const URL_ = "https://cdn.kie.ai/uploaded";
 const capabilityOf = {
   seedance: "@hypit/seedance", minimax: "@hypit/minimax-h3", grok: "@hypit/grok-imagine",
   gpt: "@hypit/gpt-image", banana: "@hypit/nano-banana", seedream: "@hypit/seedream", wan: "@hypit/wan",
-  pixverse: "@hypit/pixverse",
+  pixverse: "@hypit/pixverse", suno: "@hypit/suno", eleven: "@hypit/elevenlabs-tts", gemini: "@hypit/gemini-tts",
 } as const;
 
 function portsFor(moduleName: string, name: string) {
@@ -35,6 +38,9 @@ function portsFor(moduleName: string, name: string) {
   if (moduleName === capabilityOf.banana) return nanoBananaPorts[name as keyof typeof nanoBananaPorts];
   if (moduleName === capabilityOf.seedream) return seedream5LitePorts;
   if (moduleName === capabilityOf.wan) return wanPorts[name as keyof typeof wanPorts];
+  if (moduleName === capabilityOf.suno) return name === "generate-music" ? generateMusicPorts : generateSoundsPorts;
+  if (moduleName === capabilityOf.eleven) return elevenLabsTtsPorts[name]!;
+  if (moduleName === capabilityOf.gemini) return geminiTtsPorts[name]!;
   return pixversePorts[name as keyof typeof pixversePorts];
 }
 
@@ -253,10 +259,8 @@ test("PixVerse V6 animates a lone first frame through Kie's image-to-video shape
 test("Generation types module refs stay aligned with the plan's result types", () => {
   for (const route of kieMappings) {
     const prepared = kieRouteForCapability(route.capability)!;
-    const named = route.capability.module.name === capabilityOf.gpt
-      || route.capability.module.name === capabilityOf.banana
-      || route.capability.module.name === capabilityOf.seedream
-      || route.capability.module.name === capabilityOf.wan;
-    assert.equal(prepared.returns.name, named ? generationTypes.imageSet.name : generationTypes.videoSet.name);
+    const expected = route.result === "audio" ? generationTypes.audioSet.name
+      : route.result === "image" ? generationTypes.imageSet.name : generationTypes.videoSet.name;
+    assert.equal(prepared.returns.name, expected);
   }
 });

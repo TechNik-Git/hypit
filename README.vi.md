@@ -214,7 +214,7 @@ flowchart LR
 | **HypiHub** ⭐ (khuyên dùng) | `@hypit/provider-hypihub` | Dịch vụ hosted tích hợp: sinh ảnh, sinh video, giọng nói và WhisperX qua **một tài khoản** | Đăng nhập (`hypit auth login`) |
 | **TokenDance** | `@hypit/provider-tokendance` | Seedance 2.0/2.5, Seedream 5.0 lite, MiniMax H3 (giao thức Ark + MiniMax) | API key (BYOK) |
 | **HiAPI** | `@hypit/provider-hiapi` | Seedance, Seedream 5.0 lite, MiniMax H3, GPT Image 2, Nano Banana, Grok Imagine | API key (BYOK) |
-| **Kie.ai** | `@hypit/provider-kie` | 16 capability qua Market API của Kie: Seedance 2/2-fast/2-mini/2.5, MiniMax H3, Grok Imagine (video + 1.5 preview), PixVerse V6, GPT Image 2, Nano Banana 2/Pro, Seedream 5 Lite, Wan 2.7 Image/Pro + xoá nền (`remove-background`) | API key (BYOK) |
+| **Kie.ai** | `@hypit/provider-kie` | 26 capability qua Market API của Kie: Seedance 2/2-fast/2-mini/2.5, MiniMax H3, Grok Imagine (video + 1.5 preview), PixVerse V6, GPT Image 2, Nano Banana 2/Pro, Seedream 5 Lite, Wan 2.7 Image/Pro, Suno music/SFX/lyrics (`@hypit/suno`), TTS ElevenLabs + Gemini (`@hypit/elevenlabs-tts`, `@hypit/gemini-tts`) + xoá nền (`remove-background`) | API key (BYOK) |
 | **Pollo** | `@hypit/provider-pollo` | MiniMax H3, Grok Imagine 1.5, GPT Image 2, Nano Banana — media tham chiếu phải là **URL công khai** | API key (BYOK) |
 | **BeatAPI** | `@hypit/provider-beatapi` | Seedance 2.0/2.5, MiniMax H3, Grok Imagine 1.5, GPT Image 2, Nano Banana (có upload media tham chiếu) | API key (BYOK) |
 | **Monid** | `@hypit/provider-monid` | Seedance 2.0/2.5, MiniMax H3, ảnh Wan 2.7; mở rộng tool khác qua HTTP API của Monid | API key (BYOK) |
@@ -266,8 +266,9 @@ Bảng tổng hợp: muốn tính năng nào thì cần chuẩn bị gì.
 | Tạo video bằng AI (Seedance, MiniMax H3, Wan…) | Tài khoản **HypiHub** *hoặc* key của TokenDance/HiAPI/Pollo/BeatAPI/Monid/**Kie.ai** *hoặc* deployment riêng | Model `mini`/`fast` rẻ hơn `standard`/`2.5` |
 | Tạo ảnh bằng AI (GPT Image 2, Nano Banana, Grok Imagine, Seedream) | Như trên (tùy model mỗi dịch vụ hỗ trợ) | Có thể bỏ, chỉ dùng ảnh tự chuẩn bị |
 | Xoá nền ảnh (remove-background) | Kie.ai (`@hypit/provider-kie`, model `recraft/remove-background`) | Không dùng thì tự chỉnh ảnh nền trong suốt |
-| Giọng nói / nhân vật nói (TTS) | HypiHub *hoặc* ElevenLabs / FishAudio / MiMo *hoặc* audio thu sẵn | `generate-audio="true"` của Seedance tự sinh tiếng |
-| Transcribe + align cấp từ (caption karaoke, graphic bám từ) | **WhisperX local**: Python 3.10–3.13 + `uv` + tải model weights | *hoặc* WhisperX hosted trên **HypiHub** |
+| Giọng nói / nhân vật nói (TTS) | HypiHub *hoặc* ElevenLabs / FishAudio / MiMo *hoặc* Kie.ai (`@hypit/elevenlabs-tts`, `@hypit/gemini-tts`) *hoặc* audio thu sẵn | `generate-audio="true"` của Seedance tự sinh tiếng |
+| Nhạc nền / SFX sinh bằng AI (Suno) | Kie.ai (`@hypit/provider-kie`, capability `@hypit/suno#generate-music` / `#generate-sounds`) | Tự chuẩn bị asset nhạc sẵn |
+| Transcribe + align cấp từ (caption karaoke, graphic bám từ) | **WhisperX local**: Python 3.10–3.13 + `uv` + tải model weights | *hoặc* WhisperX hosted trên **HypiHub** (chỉ align — không sinh giọng/nhạc) |
 | Xử lý media (trim, tách, chuẩn hoá take) | **`ffmpeg` + `ffprobe`** trên `PATH` | Endpoint media tương thích khác |
 | Biến đổi ảnh (matting, xoá nền…) local | Python qua `uv` (OpenCV) | Dịch vụ hosted có cùng capability |
 | Render video cục bộ (HyperFrames) | **Chromium** (tự tải bởi `hypit runtime up`) | — |
@@ -400,14 +401,22 @@ hypit packages install @fontsource-variable/inter@5.3.0
 
 ### 7. Kết nối Kie.ai qua `@hypit/provider-kie` (provider mới)
 
-`@hypit/provider-kie` là một Provider BYOK qua **Kie.ai Market API**. Một package phục vụ **16 capability**:
+`@hypit/provider-kie` là một Provider BYOK qua **Kie.ai Market API**. Một package phục vụ **26 capability**:
 
 - **Video:** Seedance 2 / 2-fast / 2-mini / 2.5, MiniMax H3, Grok Imagine (`grok-imagine-video` + bản `1.5-preview`), PixVerse V6 (text-to-video, image-to-video, Fusion/reference-to-video, transition first–last frame).
 - **Ảnh:** GPT Image 2 (text/image-to-image), Nano Banana 2 & Pro, Seedream 5 Lite, Wan 2.7 Image & Pro.
+- **Nhạc/SFX (Suno, `@hypit/suno`):** `generate-music` (custom mode với lyrics/title/style, non-custom với image/video/audio refs), `generate-sounds` (SFX có loop/tempo/key), `generate-lyrics` (trả Text). Một request nhạc sinh nhiều track — collector lấy đủ mọi track trong `data.response.data[]`.
+- **TTS (`@hypit/elevenlabs-tts`, `@hypit/gemini-tts`):** ElevenLabs `text-to-speech-multilingual-v2`, `text-to-speech-turbo-2-5`, `text-to-dialogue-v3`, `audio-isolation`; Gemini `gemini-2-5-pro-tts`, `gemini-3-1-flash-tts`, `gemini-3-8-flash-tts`, `gemini-3-8-flash-lite-tts`.
 - **Xoá nền:** `@hypit/background-removal#remove-background` (model `recraft/remove-background`, PNG/JPEG/WEBP ≤ 5 MB).
 
 Mọi field name, enum và giới hạn byte đều đối chiếu trực tiếp từng trang `docs.kie.ai/market/...`;
 chi tiết kỹ thuật nằm trong [packages/provider-kie/README.md](./packages/provider-kie/README.md).
+
+**Giới hạn hiện có của cụm audio (Khi mở rộng — milestone sau):** các route music-ops của Suno
+(`extend`, `cover-suno`, `replace-section`, `add-instrumental`/`add-vocals`, `mashup`, `persona`,
+`convert-to-wav`, `separate-vocals`, `generate-midi`, `create-music-video`, Suno Voice) và
+`replica` voice-clone của Gemini 3.8 **chưa map** trong milestone này. Khi cần, thêm port table +
+mapping entry theo đúng pattern hiện có (docs của từng route quyết định field).
 
 **Ba bước cài:**
 
@@ -462,6 +471,11 @@ chi tiết kỹ thuật nằm trong [packages/provider-kie/README.md](./packages
   tính riêng theo credit của nó, không nằm trong gói HypiHub).
 
 ### 8. WhisperX local — caption bám từ (Word-level)
+
+**Phân biệt:** WhisperX chỉ làm **transcribe + align** (nhận dạng và neo thời gian từng từ) cho
+audio có sẵn — nó **không sinh giọng nói, không sinh nhạc**, không thay được TTS/music. Muốn sinh
+giọng/nhạc dùng cụm audio của Kie (mục 7: `@hypit/elevenlabs-tts`, `@hypit/gemini-tts`,
+`@hypit/suno`); WhisperX vẫn là đường align cho caption khi có audio.
 
 Một số tính năng full của Hypit (caption karaoke, chèn b-roll đúng từ, highlight chữ theo lời
 nói) cần word-timing chuẩn từ WhisperX. Cài như sau:

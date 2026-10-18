@@ -1156,6 +1156,24 @@ importers:
         specifier: workspace:*
         version: link:../text
 
+  packages/elevenlabs-tts:
+    dependencies:
+      '@hypit/artifact':
+        specifier: workspace:*
+        version: link:../artifact
+      '@hypit/generation':
+        specifier: workspace:*
+        version: link:../generation
+      '@hypit/model-kit':
+        specifier: workspace:*
+        version: link:../model-kit
+      '@hypit/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@hypit/text':
+        specifier: workspace:*
+        version: link:../text
+
   packages/endpoint-kit:
     dependencies:
       '@hypit/protocol':
@@ -1629,6 +1647,24 @@ importers:
       '@infolektuell/noto-color-emoji':
         specifier: 0.2.0
         version: 0.2.0
+
+  packages/gemini-tts:
+    dependencies:
+      '@hypit/artifact':
+        specifier: workspace:*
+        version: link:../artifact
+      '@hypit/generation':
+        specifier: workspace:*
+        version: link:../generation
+      '@hypit/model-kit':
+        specifier: workspace:*
+        version: link:../model-kit
+      '@hypit/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@hypit/text':
+        specifier: workspace:*
+        version: link:../text
 
   packages/generation:
     dependencies:
@@ -2474,6 +2510,9 @@ importers:
       '@hypit/runtime-kit':
         specifier: workspace:*
         version: link:../runtime-kit
+      '@hypit/text':
+        specifier: workspace:*
+        version: link:../text
     devDependencies:
       '@hypit/artifact':
         specifier: workspace:*
@@ -2484,6 +2523,12 @@ importers:
       '@hypit/driver-node':
         specifier: workspace:*
         version: link:../driver-node
+      '@hypit/elevenlabs-tts':
+        specifier: workspace:*
+        version: link:../elevenlabs-tts
+      '@hypit/gemini-tts':
+        specifier: workspace:*
+        version: link:../gemini-tts
       '@hypit/gpt-image':
         specifier: workspace:*
         version: link:../gpt-image
@@ -2505,6 +2550,9 @@ importers:
       '@hypit/seedream':
         specifier: workspace:*
         version: link:../seedream
+      '@hypit/suno':
+        specifier: workspace:*
+        version: link:../suno
       '@hypit/wan':
         specifier: workspace:*
         version: link:../wan
@@ -3412,6 +3460,27 @@ importers:
       '@hypit/protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  packages/suno:
+    dependencies:
+      '@hypit/artifact':
+        specifier: workspace:*
+        version: link:../artifact
+      '@hypit/component-kit':
+        specifier: workspace:*
+        version: link:../component-kit
+      '@hypit/generation':
+        specifier: workspace:*
+        version: link:../generation
+      '@hypit/model-kit':
+        specifier: workspace:*
+        version: link:../model-kit
+      '@hypit/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@hypit/text':
+        specifier: workspace:*
+        version: link:../text
 
   packages/svs:
     dependencies:

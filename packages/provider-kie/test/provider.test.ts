@@ -8,6 +8,7 @@ import type { BlobRef, CanonicalValue } from "@hypit/protocol";
 import { canonicalize } from "@hypit/protocol";
 import type { ResourceStore } from "@hypit/runtime";
 import { sealSeedanceRequest } from "@hypit/seedance";
+import { sealGenerateMusicRequest } from "@hypit/suno";
 
 import { createKieProvider } from "../src/provider.js";
 
@@ -246,4 +247,138 @@ test("the provider reads live credits as its pricing material", async () => {
     data: { remainingCredits: 2145 },
     summary: "Kie reports 2145 credit(s) remaining",
   }]);
+});
+
+test("a Suno run collects every track in data.response.data[] as one audio set", async () => {
+  const TRACKS = [
+    { id: "a1", audio_url: "https://cdn.kie.ai/t1.mp3", stream_audio_url: "https://cdn.kie.ai/s1",
+      image_url: "https://cdn.kie.ai/c1.jpeg", duration: 198.44 },
+    { id: "a2", audio_url: "https://cdn.kie.ai/t2.mp3", stream_audio_url: "https://cdn.kie.ai/s2",
+      image_url: "https://cdn.kie.ai/c2.jpeg", duration: 228.28 },
+  ];
+  let submitted: { readonly model: string; readonly input: Record<string, unknown> } | undefined;
+  let polls = 0;
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const respond = (payload: unknown): Response =>
+      new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/api/v1/jobs/createTask")) {
+      submitted = JSON.parse(String(init?.body)) as typeof submitted;
+      return respond({ code: 200, msg: "", data: { taskId: "task_suno_1" } });
+    }
+    if (url.includes("/api/v1/jobs/recordInfo")) {
+      polls += 1;
+      if (polls < 2) return respond({ code: 200, msg: "", data: { taskId: "task_suno_1", state: "generating" } });
+      return respond({ code: 200, msg: "", data: { taskId: "task_suno_1", state: "success",
+        response: { data: TRACKS } } });
+    }
+    if (url.startsWith("https://cdn.kie.ai/")) {
+      return new Response(new Uint8Array(DOWNLOAD_BYTES), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  const endpoints = new Map<string, AsyncEndpoint>();
+  const registrar: EndpointRegistrar = {
+    registerImmediateEndpoint() { throw new Error("Kie registers no immediate endpoints"); },
+    registerAsyncEndpoint(_id, capabilityRef, _returns, endpoint) {
+      endpoints.set(`${capabilityRef.module.name}>${capabilityRef.name}`, endpoint);
+    },
+  };
+  const provider = createKieProvider({
+    apiKey: { store: "os", key: "kie.test-key" },
+    pollIntervalMs: 10, requestTimeoutMs: 5_000, operationTimeoutMs: 60_000, fetch: fetcher,
+  });
+  await provider.install(registrar);
+  const endpoint = endpoints.get("@hypit/suno>generate-music");
+  assert(endpoint !== undefined, "generate-music must register");
+  const request = sealGenerateMusicRequest({
+    customMode: [false], instrumental: [false], model: ["V6"], style: ["rock"],
+  });
+  const store = makeStore(new Uint8Array([9, 8, 7]));
+  const { context } = makeContext({ calls: [], fetcher, submitted: () => submitted, pollCount: () => polls },
+    store.store, canonicalize({ ports: request.ports }));
+  const departed = await endpoint.start({ ...context, need: {
+    ...context.need,
+    capability: { module: { name: "@hypit/suno", version: "1" }, name: "generate-music" },
+    returns: { module: { name: "@hypit/generation", version: "1" }, name: "GeneratedAudioSet" },
+  } } as unknown as EndpointStartContext);
+  assert.equal(departed.status, "pending");
+  assert.deepEqual(submitted, {
+    model: "ai-music-api/generate",
+    input: { custom_mode: false, instrumental: false, model: "V6", style: "rock" },
+  });
+  const pollContext = { ...context, handle: departed.handle } as unknown as Parameters<typeof endpoint.poll>[0];
+  await endpoint.poll(pollContext);
+  const ready = await endpoint.poll(pollContext);
+  assert.equal(ready.status, "ready");
+  const fulfilled = await endpoint.collect?.({ ...context, handle: ready.handle } as never);
+  assert(fulfilled !== undefined && fulfilled.status === "completed");
+  const value = (fulfilled!.result as { readonly value: unknown }).value as {
+    readonly kind: string; readonly value: { audios: readonly { mediaType: string }[] };
+  };
+  assert.equal(value.kind, "inline");
+  assert.equal(value.value.audios.length, 2, "every Suno track must be collected");
+  assert.equal(value.value.audios[0]!.mediaType, "audio/mpeg");
+});
+
+test("generate-lyrics completes with one sealed Text of the finished variations", async () => {
+  let polls = 0;
+  const fetcher: typeof fetch = async (input) => {
+    const url = String(input);
+    const respond = (payload: unknown): Response =>
+      new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/api/v1/jobs/createTask")) {
+      return respond({ code: 200, msg: "", data: { taskId: "task_lyrics_1" } });
+    }
+    if (url.includes("/api/v1/jobs/recordInfo")) {
+      polls += 1;
+      if (polls < 2) return respond({ code: 200, msg: "", data: { taskId: "task_lyrics_1", state: "generating" } });
+      return respond({ code: 200, msg: "", data: { taskId: "task_lyrics_1", state: "success",
+        resultJson: JSON.stringify({ resultObject: { lyricsData: [
+          { text: "[Verse] Moonlight", title: "Starry", status: "complete", error_message: "" },
+          { text: "[Verse] Broken", title: "Broken", status: "failed", error_message: "blocked" },
+        ] } }) } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  const endpoints = new Map<string, AsyncEndpoint>();
+  const registrar: EndpointRegistrar = {
+    registerImmediateEndpoint() { throw new Error("Kie registers no immediate endpoints"); },
+    registerAsyncEndpoint(_id, capabilityRef, _returns, endpoint) {
+      endpoints.set(`${capabilityRef.module.name}>${capabilityRef.name}`, endpoint);
+    },
+  };
+  const provider = createKieProvider({
+    apiKey: { store: "os", key: "kie.test-key" },
+    pollIntervalMs: 10, requestTimeoutMs: 5_000, operationTimeoutMs: 60_000, fetch: fetcher,
+  });
+  await provider.install(registrar);
+  const endpoint = endpoints.get("@hypit/suno>generate-lyrics");
+  assert(endpoint !== undefined, "generate-lyrics must register");
+  const store = makeStore(new Uint8Array([1]));
+  const { context } = makeContext({ calls: [], fetcher, submitted: () => undefined, pollCount: () => polls },
+    store.store, canonicalize({ prompt: "a nostalgic song" }));
+  const lyricsContext = {
+    ...context,
+    need: {
+      ...context.need,
+      capability: { module: { name: "@hypit/suno", version: "1" }, name: "generate-lyrics" },
+      returns: { module: { name: "@hypit/text", version: "1" }, name: "Text" },
+      constraints: canonicalize({ prompt: "a nostalgic song" }),
+    },
+  } as unknown as EndpointStartContext;
+  const departed = await endpoint.start(lyricsContext);
+  assert.equal(departed.status, "pending");
+  const pollContext = { ...lyricsContext, handle: departed.handle } as unknown as Parameters<typeof endpoint.poll>[0];
+  await endpoint.poll(pollContext);
+  const ready = await endpoint.poll(pollContext);
+  assert.equal(ready.status, "ready");
+  const fulfilled = await endpoint.collect?.({ ...lyricsContext, handle: ready.handle } as never);
+  assert(fulfilled !== undefined && fulfilled.status === "completed");
+  const value = (fulfilled!.result as { readonly value: unknown }).value as {
+    readonly kind: string; readonly value: { value: string };
+  };
+  assert.equal(value.kind, "inline");
+  assert.match(value.value.value, /\[Verse\] Moonlight/u);
+  assert.doesNotMatch(value.value.value, /Broken/u, "failed variations must be dropped");
 });

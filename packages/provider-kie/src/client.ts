@@ -155,3 +155,66 @@ export function kieResultUrls(record: Record<string, unknown>): readonly string[
     "Kie task result contains no usable resultUrls");
   return urls.map((url) => new URL(url).href);
 }
+
+/** The parsed form of `resultJson` Kie ships on `recordInfo` success records. */
+function kieParsedResult(record: Record<string, unknown>): Record<string, unknown> {
+  const response = record.response;
+  if (response !== null && typeof response === "object") return response as Record<string, unknown>;
+  const raw = typeof record.resultJson === "string" ? record.resultJson : undefined;
+  assert(raw !== undefined && raw.trim().length > 0, "Kie task succeeded without a resultJson payload");
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch {
+    throw new EndpointResponseError("Kie task resultJson is not valid JSON");
+  }
+  return object(parsed, "Kie task result");
+}
+
+/**
+ * Suno audio tracks live at `data.response.data[]` — one entry per generated
+ * track (`audio_url`, `stream_audio_url`, `image_url`, `id`, `duration`; docs
+ * `suno-api/generate-music.md`). Every track is collected, per request.
+ * `undefined` when the record is not a Suno track payload (TTS/image/video keep
+ * the `resultUrls` shape).
+ */
+export function kieAudioTrackUrls(record: Record<string, unknown>): readonly string[] | undefined {
+  const data = kieParsedResult(record).data;
+  if (!Array.isArray(data) || data.length === 0) return undefined;
+  const urls: string[] = [];
+  for (const item of data) {
+    const track = object(item, "Kie audio track");
+    const audioUrl = track.audio_url;
+    if (typeof audioUrl !== "string" || !/^https?:\/\//u.test(audioUrl)) return undefined;
+    urls.push(new URL(audioUrl).href);
+  }
+  return urls;
+}
+
+export type KieLyricsVariation = {
+  readonly title: string;
+  readonly text: string;
+};
+
+/**
+ * `ai-music-api/generate-lyrics` delivers text, not media: the variations sit
+ * in `resultJson.resultObject.lyricsData[]` with `{text, title, status,
+ * error_message}` (docs `suno-api/generate-lyrics.md`). Only `status: complete`
+ * variations are usable.
+ */
+export function kieLyricsVariations(record: Record<string, unknown>): readonly KieLyricsVariation[] {
+  const result = kieParsedResult(record).resultObject;
+  const lyricsData = result !== null && typeof result === "object"
+    ? (result as Record<string, unknown>).lyricsData
+    : undefined;
+  assert(Array.isArray(lyricsData) && lyricsData.length > 0, "Kie lyrics task succeeded without lyricsData");
+  const complete: KieLyricsVariation[] = [];
+  for (const item of lyricsData) {
+    const variation = object(item, "Kie lyrics variation");
+    if (variation.status !== "complete") continue;
+    const text = variation.text;
+    const title = variation.title;
+    if (typeof text !== "string" || text.trim().length === 0) continue;
+    complete.push({ title: typeof title === "string" ? title : "", text });
+  }
+  assert(complete.length > 0, "Kie lyrics task completed without a finished variation");
+  return complete;
+}
